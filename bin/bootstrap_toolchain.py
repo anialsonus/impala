@@ -79,6 +79,7 @@ OS_MAPPING = [
   OsMapping("centos8", "ec2-package-centos-8", "redhat8"),
   OsMapping("rocky8", "ec2-package-centos-8", "redhat8"),
   OsMapping("almalinux8", "ec2-package-centos-8", "redhat8"),
+  OsMapping("alt8", "ec2-package-centos-7", "redhat7"),
   OsMapping("redhatenterpriseserver5", "ec2-package-centos-5", None),
   OsMapping("redhatenterpriseserver6", "ec2-package-centos-6", "redhat6"),
   OsMapping("redhatenterpriseserver7", "ec2-package-centos-7", "redhat7"),
