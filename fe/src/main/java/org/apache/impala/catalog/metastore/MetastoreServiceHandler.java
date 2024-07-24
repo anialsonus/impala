@@ -396,13 +396,6 @@ public abstract class MetastoreServiceHandler extends AbstractThriftHiveMetastor
   }
 
   @Override
-  public String get_hms_api_version() throws MetaException, TException {
-    try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
-      return client.getHiveClient().getThriftClient().get_hms_api_version();
-    }
-  }
-
-  @Override
   public String getMetaConf(String configKey) throws MetaException, TException {
     try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
       return client.getHiveClient().getThriftClient().getMetaConf(configKey);
