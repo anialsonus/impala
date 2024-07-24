@@ -66,6 +66,7 @@ import org.apache.hadoop.hive.metastore.api.CmRecycleResponse;
 import org.apache.hadoop.hive.metastore.api.ColumnStatistics;
 import org.apache.hadoop.hive.metastore.api.CommitTxnRequest;
 import org.apache.hadoop.hive.metastore.api.CompactionInfoStruct;
+import org.apache.hadoop.hive.metastore.api.CompactionMetricsDataRequest;
 import org.apache.hadoop.hive.metastore.api.CompactionRequest;
 import org.apache.hadoop.hive.metastore.api.CompactionResponse;
 import org.apache.hadoop.hive.metastore.api.ConfigValSecurityException;
@@ -896,12 +897,6 @@ public abstract class MetastoreServiceHandler extends AbstractThriftHiveMetastor
       result = client.getHiveClient().getThriftClient()
           .get_table_req(getTableRequest);
       Table tbl = result.getTable();
-      // return early if file-metadata is not requested
-      if (!getTableRequest.isGetFileMetadata()) {
-        LOG.trace("File metadata is not requested. Returning table {}",
-            tbl.getTableName());
-        return result;
-      }
       // we need to get the current ValidTxnIdList to avoid returning
       // file-metadata for in-progress compactions. If the request does not
       // include ValidWriteIdList or if the table is not transactional we compute
@@ -3081,6 +3076,15 @@ public abstract class MetastoreServiceHandler extends AbstractThriftHiveMetastor
       return client.getHiveClient().getThriftClient().get_all_write_event_info(request);
     }
   }
+
+  @Override
+  public void remove_compaction_metrics_data(
+      CompactionMetricsDataRequest request) throws MetaException, TException {
+    try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
+      client.getHiveClient().getThriftClient().remove_compaction_metrics_data(request);
+    }
+  }
+
 
   /**
    * Gets the current event id from the hive metastore.
