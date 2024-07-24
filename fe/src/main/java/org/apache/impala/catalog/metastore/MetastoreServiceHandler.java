@@ -30,6 +30,8 @@ import org.apache.hadoop.hive.metastore.DefaultPartitionExpressionProxy;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.PartFilterExprUtil;
 import org.apache.hadoop.hive.metastore.PartitionExpressionProxy;
+import org.apache.hadoop.hive.metastore.api.AbortCompactResponse;
+import org.apache.hadoop.hive.metastore.api.AbortCompactionRequest;
 import org.apache.hadoop.hive.metastore.api.AbortTxnRequest;
 import org.apache.hadoop.hive.metastore.api.AbortTxnsRequest;
 import org.apache.hadoop.hive.metastore.api.AddCheckConstraintRequest;
@@ -67,6 +69,7 @@ import org.apache.hadoop.hive.metastore.api.ColumnStatistics;
 import org.apache.hadoop.hive.metastore.api.CommitTxnRequest;
 import org.apache.hadoop.hive.metastore.api.CompactionInfoStruct;
 import org.apache.hadoop.hive.metastore.api.CompactionMetricsDataRequest;
+import org.apache.hadoop.hive.metastore.api.CompactionMetricsDataStruct;
 import org.apache.hadoop.hive.metastore.api.CompactionRequest;
 import org.apache.hadoop.hive.metastore.api.CompactionResponse;
 import org.apache.hadoop.hive.metastore.api.ConfigValSecurityException;
@@ -190,6 +193,9 @@ import org.apache.hadoop.hive.metastore.api.PrimaryKeysResponse;
 import org.apache.hadoop.hive.metastore.api.PrincipalPrivilegeSet;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.apache.hadoop.hive.metastore.api.PrivilegeBag;
+import org.apache.hadoop.hive.metastore.api.PropertyGetRequest;
+import org.apache.hadoop.hive.metastore.api.PropertyGetResponse;
+import org.apache.hadoop.hive.metastore.api.PropertySetRequest;
 import org.apache.hadoop.hive.metastore.api.PutFileMetadataRequest;
 import org.apache.hadoop.hive.metastore.api.PutFileMetadataResult;
 import org.apache.hadoop.hive.metastore.api.RenamePartitionRequest;
@@ -3085,6 +3091,58 @@ public abstract class MetastoreServiceHandler extends AbstractThriftHiveMetastor
     }
   }
 
+  @Override
+  public boolean update_compaction_metrics_data(
+      CompactionMetricsDataStruct request) throws MetaException, TException {
+    try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
+      return client.getHiveClient().getThriftClient().update_compaction_metrics_data(request);
+    }
+  }
+
+  @Override
+  public AbortCompactResponse abort_Compactions(AbortCompactionRequest request)
+      throws TException {
+    try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
+      return client.getHiveClient().getThriftClient().abort_Compactions(request);
+    }
+  }
+  @Override
+  public void add_write_ids_to_min_history(long l, Map<String, Long> map)
+      throws MetaException, TException {
+    try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
+       client.getHiveClient().getThriftClient().add_write_ids_to_min_history(l, map);
+    }
+  }
+
+  @Override
+  public boolean submit_for_cleanup(CompactionRequest compactionRequest, long l, long l1)
+      throws MetaException, TException {
+    try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
+      return client.getHiveClient().getThriftClient().submit_for_cleanup(compactionRequest, l, l1);
+    }
+  }
+
+  @Override
+  public void mark_refused(CompactionInfoStruct compactionInfoStruct)
+      throws MetaException, TException {
+    try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
+      client.getHiveClient().getThriftClient().mark_refused(compactionInfoStruct);
+    }
+  }
+
+  @Override
+  public PropertyGetResponse get_properties(PropertyGetRequest propertyGetRequest)
+      throws MetaException, NoSuchObjectException, TException {
+    try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
+      return client.getHiveClient().getThriftClient().get_properties(propertyGetRequest);
+    }
+  }
+
+  @Override
+  public boolean set_properties(PropertySetRequest propertySetRequest)
+      throws MetaException, NoSuchObjectException, TException {
+    return false;
+  }
 
   /**
    * Gets the current event id from the hive metastore.
