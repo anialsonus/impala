@@ -32,7 +32,7 @@ import java.lang.management.ThreadInfo;
 import java.util.ArrayList;
 import java.util.Map;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.impala.service.BackendConfig;
 import org.apache.impala.thrift.TGetJMXJsonResponse;
 import org.apache.impala.util.JMXJsonUtil;
