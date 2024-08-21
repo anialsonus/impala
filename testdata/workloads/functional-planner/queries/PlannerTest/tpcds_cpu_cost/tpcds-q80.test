@@ -541,7 +541,7 @@ max-parallelism=10 segment-costs=[265114, 221854, 313895, 220] cpu-comparison-re
 |  in pipelines: 65(GETNEXT), 47(OPEN), 55(OPEN), 63(OPEN)
 |
 64:EXCHANGE [HASH(CASE valid_tid(26,27,28) WHEN 26 THEN murmur_hash(channel) WHEN 27 THEN murmur_hash(channel) WHEN 28 THEN murmur_hash(NULL) END,CASE valid_tid(26,27,28) WHEN 26 THEN murmur_hash(id) WHEN 27 THEN murmur_hash(NULL) WHEN 28 THEN murmur_hash(NULL) END)]
-|  mem-estimate=27.48MB mem-reservation=0B thread-reservation=0
+|  mem-estimate=2.98MB mem-reservation=0B thread-reservation=0
 |  tuple-ids=26N,27N,28N row-size=216B cardinality=36.72K cost=43261
 |  in pipelines: 47(GETNEXT), 55(GETNEXT), 63(GETNEXT)
 |
@@ -1033,7 +1033,7 @@ max-parallelism=120 segment-costs=[2169, 125388, 29, 344492, 567467] cpu-compari
 |  in pipelines: 47(GETNEXT), 01(OPEN)
 |
 46:EXCHANGE [HASH(s_store_id)]
-|  mem-estimate=6.21MB mem-reservation=0B thread-reservation=0
+|  mem-estimate=534.72KB mem-reservation=0B thread-reservation=0
 |  tuple-ids=6 row-size=76B cardinality=678 cost=312
 |  in pipelines: 01(GETNEXT)
 |
@@ -1210,7 +1210,7 @@ max-parallelism=180 segment-costs=[1764974287, 3667] cpu-comparison-result=287 [
 |  JOIN BUILD
 |  |  join-table-id=04 plan-id=05 cohort-id=01
 |  |  build expressions: sr_item_sk, sr_ticket_number
-|  |  mem-estimate=342.13MB mem-reservation=34.00MB spill-buffer=2.00MB thread-reservation=0 cost=863988632
+|  |  mem-estimate=4.01GB mem-reservation=34.00MB spill-buffer=2.00MB thread-reservation=0 cost=863988632
 |  |
 |  41:EXCHANGE [HASH(sr_item_sk,sr_ticket_number)]
 |  |  mem-estimate=12.81MB mem-reservation=0B thread-reservation=0
@@ -1219,7 +1219,7 @@ max-parallelism=180 segment-costs=[1764974287, 3667] cpu-comparison-result=287 [
 |  |
 |  F01:PLAN FRAGMENT [RANDOM] hosts=10 instances=120
 |  Per-Host Shared Resources: mem-estimate=1.00MB mem-reservation=1.00MB thread-reservation=0 runtime-filters-memory=1.00MB
-|  Per-Instance Resources: mem-estimate=27.25MB mem-reservation=512.00KB thread-reservation=1
+|  Per-Instance Resources: mem-estimate=16.94MB mem-reservation=512.00KB thread-reservation=1
 |  max-parallelism=190 segment-costs=[1806773027]
 |  02:SCAN HDFS [tpcds_partitioned_parquet_snap.store_returns, RANDOM]
 |     HDFS partitions=2004/2004 files=2004 size=33.63MB
@@ -1301,7 +1301,7 @@ max-parallelism=10 segment-costs=[265114, 221854, 313895, 220] cpu-comparison-re
 |  in pipelines: 65(GETNEXT), 47(OPEN), 55(OPEN), 63(OPEN)
 |
 64:EXCHANGE [HASH(CASE valid_tid(26,27,28) WHEN 26 THEN murmur_hash(channel) WHEN 27 THEN murmur_hash(channel) WHEN 28 THEN murmur_hash(NULL) END,CASE valid_tid(26,27,28) WHEN 26 THEN murmur_hash(id) WHEN 27 THEN murmur_hash(NULL) WHEN 28 THEN murmur_hash(NULL) END)]
-|  mem-estimate=27.48MB mem-reservation=0B thread-reservation=0
+|  mem-estimate=2.98MB mem-reservation=0B thread-reservation=0
 |  tuple-ids=26N,27N,28N row-size=216B cardinality=36.72K cost=43261
 |  in pipelines: 47(GETNEXT), 55(GETNEXT), 63(GETNEXT)
 |
@@ -1793,7 +1793,7 @@ max-parallelism=120 segment-costs=[2169, 125388, 29, 344492, 567467] cpu-compari
 |  in pipelines: 47(GETNEXT), 01(OPEN)
 |
 46:EXCHANGE [HASH(s_store_id)]
-|  mem-estimate=6.21MB mem-reservation=0B thread-reservation=0
+|  mem-estimate=534.72KB mem-reservation=0B thread-reservation=0
 |  tuple-ids=6 row-size=76B cardinality=678 cost=312
 |  in pipelines: 01(GETNEXT)
 |
@@ -1970,7 +1970,7 @@ max-parallelism=180 segment-costs=[1764974287, 3667] cpu-comparison-result=287 [
 |  JOIN BUILD
 |  |  join-table-id=04 plan-id=05 cohort-id=01
 |  |  build expressions: sr_item_sk, sr_ticket_number
-|  |  mem-estimate=342.13MB mem-reservation=34.00MB spill-buffer=2.00MB thread-reservation=0 cost=863988632
+|  |  mem-estimate=4.01GB mem-reservation=34.00MB spill-buffer=2.00MB thread-reservation=0 cost=863988632
 |  |
 |  41:EXCHANGE [HASH(sr_item_sk,sr_ticket_number)]
 |  |  mem-estimate=12.81MB mem-reservation=0B thread-reservation=0
@@ -1979,7 +1979,7 @@ max-parallelism=180 segment-costs=[1764974287, 3667] cpu-comparison-result=287 [
 |  |
 |  F01:PLAN FRAGMENT [RANDOM] hosts=10 instances=120
 |  Per-Host Shared Resources: mem-estimate=1.00MB mem-reservation=1.00MB thread-reservation=0 runtime-filters-memory=1.00MB
-|  Per-Instance Resources: mem-estimate=27.25MB mem-reservation=512.00KB thread-reservation=1
+|  Per-Instance Resources: mem-estimate=16.94MB mem-reservation=512.00KB thread-reservation=1
 |  max-parallelism=190 segment-costs=[1806773027]
 |  02:SCAN HDFS [tpcds_partitioned_parquet_snap.store_returns, RANDOM]
 |     HDFS partitions=2004/2004 files=2004 size=33.63MB
