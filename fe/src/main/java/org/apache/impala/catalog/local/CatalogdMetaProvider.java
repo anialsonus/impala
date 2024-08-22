@@ -17,6 +17,8 @@
 
 package org.apache.impala.catalog.local;
 
+import static org.apache.impala.util.TUniqueIdUtil.PrintId;
+
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -463,7 +465,7 @@ public class CatalogdMetaProvider implements MetaProvider {
       case PARTITION_NOT_FOUND:
       case DATA_SOURCE_NOT_FOUND:
         invalidateCacheForObject(req.object_desc);
-        throw new InconsistentMetadataFetchException(
+        throw new InconsistentMetadataFetchException(resp.lookup_status,
             String.format("Fetching %s failed: %s. Could not find %s",
                 req.object_desc.type, resp.lookup_status, req.object_desc));
       default: break;
@@ -483,7 +485,7 @@ public class CatalogdMetaProvider implements MetaProvider {
       LOG.warn("Catalog object {} changed version from {} to {} while fetching metadata",
           req.object_desc.toString(), req.object_desc.catalog_version,
           resp.object_version_number);
-      throw new InconsistentMetadataFetchException(
+      throw new InconsistentMetadataFetchException(CatalogLookupStatus.VERSION_MISMATCH,
           String.format("Catalog object %s changed version between accesses.",
               req.object_desc.toString()));
     }
@@ -1571,7 +1573,7 @@ public class CatalogdMetaProvider implements MetaProvider {
         if (!catalogServiceId_.equals(Catalog.INITIAL_CATALOG_SERVICE_ID)) {
           LOG.warn("Detected catalog service restart: service ID changed from " +
               "{} to {}. Invalidating all cached metadata on this coordinator.",
-              catalogServiceId_, serviceId);
+              PrintId(catalogServiceId_), PrintId(serviceId));
         }
         catalogServiceId_ = serviceId;
         cache_.invalidateAll();

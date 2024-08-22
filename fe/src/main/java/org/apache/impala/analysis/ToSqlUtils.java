@@ -29,8 +29,7 @@ import org.antlr.runtime.ANTLRStringStream;
 import org.antlr.runtime.RecognitionException;
 import org.antlr.runtime.Token;
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.lang.ObjectUtils;
-import org.apache.commons.lang.StringEscapeUtils;
+import org.apache.commons.text.StringEscapeUtils;
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.ql.parse.HiveLexer;
 import org.apache.impala.catalog.CatalogException;
@@ -675,9 +674,10 @@ public class ToSqlUtils {
     List<Entry<String, String>> mapEntries = Lists.newArrayList(propertyMap.entrySet());
     Collections.sort(mapEntries, new Comparator<Entry<String, String>>() {
       @Override
-      public int compare(Entry<String, String> o1, Entry<String, String> o2) {
-        return ObjectUtils.compare(o1.getKey(), o2.getKey());
-      } });
+      public int compare(Map.Entry<String, String> o1, Map.Entry<String, String> o2) {
+        return o1.getKey().compareTo(o2.getKey());
+      }
+    });
 
     List<String> properties = new ArrayList<>();
     for (Map.Entry<String, String> entry: mapEntries) {

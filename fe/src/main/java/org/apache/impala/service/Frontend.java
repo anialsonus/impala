@@ -18,6 +18,7 @@
 package org.apache.impala.service;
 
 import static org.apache.impala.common.ByteUnits.MEGABYTE;
+import static org.apache.impala.util.TUniqueIdUtil.PrintId;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
@@ -53,7 +54,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -154,6 +155,7 @@ import org.apache.impala.planner.HdfsScanNode;
 import org.apache.impala.planner.PlanFragment;
 import org.apache.impala.planner.Planner;
 import org.apache.impala.planner.ScanNode;
+import org.apache.impala.thrift.CatalogLookupStatus;
 import org.apache.impala.thrift.TAlterDbParams;
 import org.apache.impala.thrift.TBackendGflags;
 import org.apache.impala.thrift.TCatalogOpRequest;
@@ -1141,25 +1143,72 @@ public class Frontend {
   /**
    * A Callable wrapper used for checking authorization to tables/databases.
    */
-  private class CheckAuthorization implements Callable<Boolean> {
-    private final String dbName_;
-    private final String tblName_;
-    private final String owner_;
-    private final User user_;
+  private abstract class CheckAuthorization implements Callable<Boolean> {
+    protected final User user_;
 
-    public CheckAuthorization(String dbName, String tblName, String owner, User user) {
-      // dbName and user cannot be null, tblName and owner can be null.
-      Preconditions.checkNotNull(dbName);
+    public CheckAuthorization(User user) {
       Preconditions.checkNotNull(user);
-      dbName_ = dbName;
-      tblName_ = tblName;
-      owner_ = owner;
-      user_ = user;
+      this.user_ = user;
     }
+
+    public abstract boolean checkAuthorization() throws Exception;
 
     @Override
     public Boolean call() throws Exception {
-      return Boolean.valueOf(isAccessibleToUser(dbName_, tblName_, owner_, user_));
+      return checkAuthorization();
+    }
+  }
+
+  private class CheckDbAuthorization extends CheckAuthorization {
+    private final FeDb db_;
+
+    public CheckDbAuthorization(FeDb db, User user) {
+      super(user);
+      Preconditions.checkNotNull(db);
+      this.db_ = db;
+    }
+
+    @Override
+    public boolean checkAuthorization() throws Exception {
+      try {
+        // FeDb.getOwnerUser() could throw InconsistentMetadataFetchException in local
+        // catalog mode if the db is not cached locally and is dropped in catalogd.
+        return isAccessibleToUser(db_.getName(), null, db_.getOwnerUser(), user_);
+      } catch (InconsistentMetadataFetchException e) {
+        Preconditions.checkState(e.getReason() == CatalogLookupStatus.DB_NOT_FOUND,
+            "Unexpected failure of InconsistentMetadataFetchException: %s",
+            e.getReason());
+        LOG.warn("Database {} no longer exists", db_.getName(), e);
+      }
+      return false;
+    }
+  }
+
+  private class CheckTableAuthorization extends CheckAuthorization {
+    private final FeTable table_;
+
+    public CheckTableAuthorization(FeTable table, User user) {
+      super(user);
+      Preconditions.checkNotNull(table);
+      this.table_ = table;
+    }
+
+    @Override
+    public boolean checkAuthorization() throws Exception {
+      // Get the owner information. Do not force load the table, only get it
+      // from cache, if it is already loaded. This means that we cannot access
+      // ownership information for unloaded tables and they will not be listed
+      // here. This might result in situations like 'show tables' not listing
+      // 'owned' tables for a given user just because the metadata is not loaded.
+      // TODO(IMPALA-8937): Figure out a way to load Table/Database ownership
+      //  information when fetching the table lists from HMS.
+      String tableOwner = table_.getOwnerUser();
+      if (tableOwner == null) {
+        LOG.info("Table {} not yet loaded, ignoring it in table listing.",
+            table_.getFullName());
+      }
+      return isAccessibleToUser(
+          table_.getDb().getName(), table_.getName(), tableOwner, user_);
     }
   }
 
@@ -1168,9 +1217,10 @@ public class Frontend {
     return getTableNames(dbName, matcher, user, /*tableTypes*/ Collections.emptySet());
   }
 
-  /** Returns the names of the tables of types specified in 'tableTypes' in database
+  /**
+   * Returns the names of the tables of types specified in 'tableTypes' in database
    * 'dbName' that are accessible to 'user'. Only tables that match the pattern of
-   * 'matcher' are returned.
+   * 'matcher' are returned. Returns an empty list if the db doesn't exist.
    */
   public List<String> getTableNames(String dbName, PatternMatcher matcher, User user,
       Set<TImpalaTableType> tableTypes) throws ImpalaException {
@@ -1178,8 +1228,11 @@ public class Frontend {
         String.format("fetching %s table names", dbName));
     while (true) {
       try {
-        return doGetCatalogTableNames(dbName, matcher, user, tableTypes);
-      } catch(InconsistentMetadataFetchException e) {
+        FeCatalog catalog = getCatalog();
+        List<String> tblNames = catalog.getTableNames(dbName, matcher, tableTypes);
+        filterTablesIfAuthNeeded(dbName, user, tblNames);
+        return tblNames;
+      } catch (InconsistentMetadataFetchException e) {
         retries.handleRetryOrThrow(e);
       }
     }
@@ -1198,6 +1251,9 @@ public class Frontend {
         return doGetMetadataTableNames(dbName, tblName, matcher, user);
       } catch(InconsistentMetadataFetchException e) {
         retries.handleRetryOrThrow(e);
+      } catch (DatabaseNotFoundException e) {
+        LOG.warn("Database {} no longer exists", dbName, e);
+        return Collections.emptyList();
       }
     }
   }
@@ -1225,9 +1281,10 @@ public class Frontend {
       }
     }
 
-    if (failedCheckTasks > 0)
+    if (failedCheckTasks > 0) {
       throw new InternalException("Failed to check access." +
           "Check the server log for more details.");
+    }
   }
 
   private void filterTablesIfAuthNeeded(String dbName, User user, List<String> tblNames)
@@ -1237,38 +1294,19 @@ public class Frontend {
 
     if (needsAuthChecks) {
       List<Future<Boolean>> pendingCheckTasks = Lists.newArrayList();
-      Iterator<String> iter = tblNames.iterator();
-      while (iter.hasNext()) {
-        String tblName = iter.next();
-        // Get the owner information. Do not force load the table, only get it
-        // from cache, if it is already loaded. This means that we cannot access
-        // ownership information for unloaded tables and they will not be listed
-        // here. This might result in situations like 'show tables' not listing
-        // 'owned' tables for a given user just because the metadata is not loaded.
-        // TODO(IMPALA-8937): Figure out a way to load Table/Database ownership
-        // information when fetching the table lists from HMS.
+      for (String tblName : tblNames) {
         FeTable table = getCatalog().getTableIfCached(dbName, tblName);
-        String tableOwner = table.getOwnerUser();
-        if (tableOwner == null) {
-          LOG.info("Table {} not yet loaded, ignoring it in table listing.",
-            dbName + "." + tblName);
+        // Table could be removed after we get the table list.
+        if (table == null) {
+          LOG.warn("Table {}.{} no longer exists", dbName, tblName);
+          continue;
         }
         pendingCheckTasks.add(checkAuthorizationPool_.submit(
-            new CheckAuthorization(dbName, tblName, tableOwner, user)));
+            new CheckTableAuthorization(table, user)));
       }
 
       filterUnaccessibleElements(pendingCheckTasks, tblNames);
     }
-  }
-
-  private List<String> doGetCatalogTableNames(String dbName, PatternMatcher matcher,
-      User user, Set<TImpalaTableType> tableTypes) throws ImpalaException {
-    FeCatalog catalog = getCatalog();
-    List<String> tblNames = catalog.getTableNames(dbName, matcher, tableTypes);
-
-    filterTablesIfAuthNeeded(dbName, user, tblNames);
-
-    return tblNames;
   }
 
   private List<String> doGetMetadataTableNames(String dbName, String catalogTblName,
@@ -1420,7 +1458,7 @@ public class Frontend {
       while (iter.hasNext()) {
         FeDb db = iter.next();
         pendingCheckTasks.add(checkAuthorizationPool_.submit(
-            new CheckAuthorization(db.getName(), null, db.getOwnerUser(), user)));
+            new CheckDbAuthorization(db, user)));
       }
 
       filterUnaccessibleElements(pendingCheckTasks, dbs);
@@ -1478,8 +1516,7 @@ public class Frontend {
   private boolean isAccessibleToUser(String dbName, String tblName,
       String owner, User user) throws InternalException {
     Preconditions.checkNotNull(dbName);
-    if (tblName == null &&
-        dbName.toLowerCase().equals(Catalog.DEFAULT_DB.toLowerCase())) {
+    if (tblName == null && dbName.equalsIgnoreCase(Catalog.DEFAULT_DB)) {
       // Default DB should always be shown.
       return true;
     }
@@ -2726,7 +2763,7 @@ public class Frontend {
           planCtx.compilationState_.setKuduTransactionToken(null);
           abortKuduTransaction(queryCtx.getQuery_id());
           timeline.markEvent(
-              "Kudu transaction aborted: " + queryCtx.getQuery_id().toString());
+              "Kudu transaction aborted: " + PrintId(queryCtx.getQuery_id()));
         } catch (TransactionException te) {
           LOG.error("Could not abort transaction because: " + te.getMessage());
         }
@@ -3201,10 +3238,10 @@ public class Frontend {
     KuduTransaction txn = null;
     try {
       // Open Kudu transaction.
-      LOG.info("Open Kudu transaction: " + queryCtx.getQuery_id().toString());
+      LOG.info("Open Kudu transaction: {}", PrintId(queryCtx.getQuery_id()));
       txn = client.newTransaction();
       timeline.markEvent(
-          "Kudu transaction opened with query id: " + queryCtx.getQuery_id().toString());
+          "Kudu transaction opened with query id: " + PrintId(queryCtx.getQuery_id()));
       token = txn.serialize();
       if (analysisResult.isUpdateStmt()) {
         analysisResult.getUpdateStmt().setKuduTransactionToken(token);
@@ -3229,7 +3266,7 @@ public class Frontend {
    * @param queryId is the id of the query.
    */
   public void abortKuduTransaction(TUniqueId queryId) throws TransactionException {
-    LOG.info("Abort Kudu transaction: " + queryId.toString());
+    LOG.info("Abort Kudu transaction: {}", PrintId(queryId));
     KuduTransaction txn = kuduTxnManager_.deleteTransaction(queryId);
     Preconditions.checkNotNull(txn);
     if (txn != null) {
@@ -3250,7 +3287,7 @@ public class Frontend {
    * @param queryId is the id of the query.
    */
   public void commitKuduTransaction(TUniqueId queryId) throws TransactionException {
-    LOG.info("Commit Kudu transaction: " + queryId.toString());
+    LOG.info("Commit Kudu transaction: {}", PrintId(queryId));
     KuduTransaction txn = kuduTxnManager_.deleteTransaction(queryId);
     Preconditions.checkNotNull(txn);
     if (txn != null) {

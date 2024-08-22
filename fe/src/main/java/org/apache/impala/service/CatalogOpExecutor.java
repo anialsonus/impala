@@ -3483,7 +3483,7 @@ public class CatalogOpExecutor {
     try {
       Database db = metastoreClient.getDatabase(dbName);
       if (!db.isSetParameters()) return false;
-      return org.apache.commons.lang.StringUtils
+      return org.apache.commons.lang3.StringUtils
           .isNotEmpty(db.getParameters().get("repl.source.for"));
     } catch (TException tException) {
       throw new CatalogException(
@@ -6997,11 +6997,16 @@ public class CatalogOpExecutor {
       // Result table of the invalidate/refresh operation.
       Table tbl = null;
       TableName tblName = TableName.fromThrift(req.getTable_name());
+      long eventId = -1L;
+      try (MetaStoreClient msClient = catalog_.getMetaStoreClient(catalogTimeline)) {
+        eventId = MetastoreEventsProcessor.getCurrentEventIdNoThrow(
+            msClient.getHiveClient());
+      }
       if (!req.isIs_refresh()) {
         // For INVALIDATE METADATA <db>.<table>, the db might be unloaded.
         // So we can't update 'tbl' here.
         updatedThriftTable = catalog_.invalidateTable(
-            req.getTable_name(), tblWasRemoved, dbWasAdded, catalogTimeline);
+            req.getTable_name(), tblWasRemoved, dbWasAdded, catalogTimeline, eventId);
         catalogTimeline.markEvent("Invalidated table in catalog cache");
       } else {
         // Quick check to see if the table exists in the catalog without triggering
@@ -7039,8 +7044,8 @@ public class CatalogOpExecutor {
                 updatedThriftTable = catalog_.reloadTable(tbl, req, resultType, cmdString,
                     /*eventId*/ -1, catalogTimeline);
               } catch (IcebergTableLoadingException e) {
-                updatedThriftTable = catalog_.invalidateTable(
-                    req.getTable_name(), tblWasRemoved, dbWasAdded, catalogTimeline);
+                updatedThriftTable = catalog_.invalidateTable(req.getTable_name(),
+                    tblWasRemoved, dbWasAdded, catalogTimeline, eventId);
               }
             }
           } else {

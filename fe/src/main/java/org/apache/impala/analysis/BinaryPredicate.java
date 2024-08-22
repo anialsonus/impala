@@ -20,6 +20,7 @@ package org.apache.impala.analysis;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 import org.apache.impala.catalog.Db;
 import org.apache.impala.catalog.FeTable;
@@ -45,6 +46,9 @@ import com.google.common.collect.Lists;
 public class BinaryPredicate extends Predicate {
   // true if this BinaryPredicate is inferred from slot equivalences, false otherwise.
   private boolean isInferred_ = false;
+
+  private ExprId betweenExprId_ = null;
+  private double betweenSelectivity_ = -1;
 
   public enum Operator {
     EQ("=", "eq", TComparisonOp.EQ),
@@ -155,6 +159,8 @@ public class BinaryPredicate extends Predicate {
     super(other);
     op_ = other.op_;
     isInferred_ = other.isInferred_;
+    betweenExprId_ = other.betweenExprId_;
+    betweenSelectivity_ = other.betweenSelectivity_;
   }
 
   public boolean isNullMatchingEq() { return op_ == Operator.NULL_MATCHING_EQ; }
@@ -193,6 +199,10 @@ public class BinaryPredicate extends Predicate {
     toStrHelper.add("op", op_).addValue(super.debugString());
     if (isAuxExpr()) toStrHelper.add("isAux", true);
     if (isInferred_) toStrHelper.add("isInferred", true);
+    if (derivedFromBetween()) {
+      toStrHelper.add("betweenExprId", betweenExprId_);
+      toStrHelper.add("betweenSelectivity", betweenSelectivity_);
+    }
     return toStrHelper.toString();
   }
 
@@ -409,10 +419,24 @@ public class BinaryPredicate extends Predicate {
   }
 
   @Override
-  public boolean localEquals(Expr that) {
+  protected boolean localEquals(Expr that) {
     return super.localEquals(that) && op_.equals(((BinaryPredicate)that).op_);
   }
 
   @Override
+  protected int localHash() {
+    return Objects.hash(super.localHash(), op_);
+  }
+
+  @Override
   public Expr clone() { return new BinaryPredicate(this); }
+
+  public void setBetweenSelectivity(ExprId betweenExprId, double betweenSelectivity) {
+    betweenExprId_ = betweenExprId;
+    betweenSelectivity_ = betweenSelectivity;
+  }
+
+  public boolean derivedFromBetween() { return betweenExprId_ != null; }
+  public ExprId getBetweenExprId() { return betweenExprId_; }
+  public double getBetweenSelectivity() { return betweenSelectivity_; }
 }

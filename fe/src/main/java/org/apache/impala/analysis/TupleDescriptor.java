@@ -24,7 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.impala.catalog.ColumnStats;
 import org.apache.impala.catalog.FeFsTable;
 import org.apache.impala.catalog.FeKuduTable;
@@ -439,7 +439,7 @@ public class TupleDescriptor {
           nullIndicatorByte = nullIndicators.first;
           nullIndicatorBit = nullIndicators.second;
         }
-        if (d.getType().isCollectionType() && d.isMaterializedRecursively()) {
+        if (d.getType().isCollectionType() && d.shouldMaterializeRecursively()) {
           d.getItemTupleDesc().computeMemLayout();
         }
       }

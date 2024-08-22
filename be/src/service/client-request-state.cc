@@ -82,6 +82,11 @@ DECLARE_bool(use_local_catalog);
 
 namespace impala {
 
+PROFILE_DEFINE_TIMER(ClientFetchLockWaitTimer, UNSTABLE,
+    "Cumulative time client fetch requests waiting for locks.");
+PROFILE_DEFINE_SUMMARY_STATS_TIMER(GetInFlightProfileTimeStats, UNSTABLE,
+    "Summary stats of the time dumping profiles when the query is still in-flight.");
+
 // Keys into the info string map of the runtime profile referring to specific
 // items used by CM for monitoring purposes.
 static const string PER_HOST_MEM_KEY = "Estimated Per-Host Mem";
@@ -130,6 +135,10 @@ ClientRequestState::ClientRequestState(const TQueryCtx& query_ctx, Frontend* fro
   rpc_read_timer_ = ADD_TIMER(server_profile_, "RPCReadTimer");
   rpc_write_timer_ = ADD_TIMER(server_profile_, "RPCWriteTimer");
   rpc_count_ = ADD_COUNTER(server_profile_, "RPCCount", TUnit::UNIT);
+  get_inflight_profile_time_stats_ =
+      PROFILE_GetInFlightProfileTimeStats.Instantiate(server_profile_);
+  client_fetch_lock_wait_timer_ =
+      PROFILE_ClientFetchLockWaitTimer.Instantiate(server_profile_);
   bool is_external_fe = session_type() == TSessionType::EXTERNAL_FRONTEND;
   // "Impala Backend Timeline" was specifically chosen to exploit the lexicographical
   // ordering defined by the underlying std::map holding the timelines displayed in
