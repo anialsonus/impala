@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
 import org.apache.commons.lang3.StringUtils;
@@ -108,6 +109,7 @@ import org.apache.impala.service.FeSupport;
 import org.apache.impala.thrift.QueryConstants;
 import org.apache.impala.thrift.TAccessEvent;
 import org.apache.impala.thrift.TCatalogObjectType;
+import org.apache.impala.thrift.TImpalaQueryOptions;
 import org.apache.impala.thrift.TLineageGraph;
 import org.apache.impala.thrift.TNetworkAddress;
 import org.apache.impala.thrift.TQueryCtx;
@@ -124,12 +126,19 @@ import org.apache.impala.util.ListMap;
 import org.apache.impala.util.MetaStoreUtil;
 import org.apache.impala.util.TSessionStateUtil;
 import org.apache.kudu.client.KuduClient;
+import org.github.jamm.CannotAccessFieldException;
+import org.github.jamm.MemoryMeter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Snapshot;
+import com.codahale.metrics.UniformReservoir;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -574,6 +583,10 @@ public class Analyzer {
     // Expr rewriter for normalizing and rewriting expressions.
     private final ExprRewriter exprRewriter_;
 
+    // Null slots cache - for expressions with slots replaced by nulls - to reduce
+    // backend expression evaluation when query contains many similar expressions.
+    private final Cache<Expr, Boolean> nullSlotsCache;
+
     // Total number of expressions across the statement (including all subqueries). This
     // is used to enforce a limit on the total number of expressions. Incremented by
     // incrementNumStmtExprs(). Note that this does not include expressions that do not
@@ -648,6 +661,9 @@ public class Analyzer {
       }
       rules.add(CountStarToConstRule.INSTANCE);
       exprRewriter_ = new ExprRewriter(rules);
+      nullSlotsCache =
+          queryCtx.getClient_request().getQuery_options().use_null_slots_cache ?
+          CacheBuilder.newBuilder().concurrencyLevel(1).recordStats().build() : null;
     }
   };
 
@@ -2467,6 +2483,8 @@ public class Analyzer {
    */
   public List<Expr> getBoundPredicates(TupleId destTid, Set<SlotId> ignoreSlots,
       boolean markAssigned) {
+    // Map that tracks BinaryPredicates that derived from the same BetweenPredicate.
+    Map<ExprId, List<BinaryPredicate>> betweenPredicates = new HashMap<>();
     List<Expr> result = new ArrayList<>();
     for (ExprId srcConjunctId: globalState_.singleTidConjuncts) {
       Expr srcConjunct = globalState_.conjuncts.get(srcConjunctId);
@@ -2617,8 +2635,27 @@ public class Analyzer {
           }
         }
 
-        // check if we already created this predicate
-        if (!result.contains(p)) result.add(p);
+        if ((p instanceof BinaryPredicate)
+            && ((BinaryPredicate) p).derivedFromBetween()) {
+          BinaryPredicate b = (BinaryPredicate) p;
+          betweenPredicates.computeIfAbsent(b.getBetweenExprId(), k -> new ArrayList<>());
+          betweenPredicates.get(b.getBetweenExprId()).add(b);
+        } else {
+          // check if we already created this predicate
+          if (!result.contains(p)) result.add(p);
+        }
+      }
+    }
+
+    if (!betweenPredicates.isEmpty()) {
+      // Prioritize members of 'betweenPredicates' ahead of 'result'.
+      // BinaryPredicates that derived from BetweenPredicates may have lower selectivity
+      // estimate from BetweenToCompoundRule. Placing them in-front will ensure that
+      // they are retained over other matching BinaryPredicates that do not come from
+      // BetweenPredicates when passed through Expr.removeDuplicates().
+      List<Expr> prioritizedExprs = new ArrayList<>();
+      for (List<BinaryPredicate> predicates : betweenPredicates.values()) {
+        prioritizedExprs.addAll(predicates);
       }
     }
     return result;
@@ -2877,6 +2914,9 @@ public class Analyzer {
           LOG.trace(String.format("slot(%s) -> scc(%d)", slotDesc.getId(), sccId));
         }
       }
+      prioritizedExprs.addAll(result);
+      Expr.removeDuplicates(prioritizedExprs);
+      result = prioritizedExprs;
     }
     return result;
   }
@@ -2941,7 +2981,41 @@ public class Analyzer {
    */
   public boolean isTrueWithNullSlots(Expr p) throws InternalException {
     Expr nullTuplePred = substituteNullSlots(p);
-    return FeSupport.EvalPredicate(nullTuplePred, getQueryCtx());
+    if (globalState_.nullSlotsCache == null) {
+      return FeSupport.EvalPredicate(nullTuplePred, getQueryCtx());
+    }
+
+    try {
+      return globalState_.nullSlotsCache.get(nullTuplePred,
+          () -> FeSupport.EvalPredicate(nullTuplePred, getQueryCtx()));
+    } catch (ExecutionException e) {
+      Preconditions.checkState(e.getCause() instanceof InternalException,
+          "Internal error using null slots cache: %s\nDisable null slots cache with " +
+          "the %s query option.", e, TImpalaQueryOptions.USE_NULL_SLOTS_CACHE.name());
+      throw (InternalException) e.getCause();
+    }
+  }
+
+  /**
+   * Log hit rate and size of null slots cache.
+   */
+  public void logCacheStats() {
+    if (!LOG.isDebugEnabled() || globalState_.nullSlotsCache == null) return;
+
+    Histogram exprSize = new Histogram(new UniformReservoir());
+    MemoryMeter meter = MemoryMeter.builder().build();
+    for (Expr expr : globalState_.nullSlotsCache.asMap().keySet()) {
+      try {
+        exprSize.update(meter.measureDeep(expr));
+      } catch (CannotAccessFieldException e) {
+        // This may happen if we miss an add-opens call for lambdas in Java 17.
+        LOG.warn("Unable to weigh cache entry, additional add-opens needed", e);
+      }
+    }
+    Snapshot snap = exprSize.getSnapshot();
+    LOG.debug("null slots cache size: {}, median entry: {}, 99th percentile entry: {}, "+
+        "hit rate: {}", globalState_.nullSlotsCache.size(), snap.getMedian(),
+        snap.get99thPercentile(), globalState_.nullSlotsCache.stats().hitRate());
   }
 
   /**
