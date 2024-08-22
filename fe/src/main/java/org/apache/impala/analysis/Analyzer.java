@@ -2647,6 +2647,7 @@ public class Analyzer {
       }
     }
 
+
     if (!betweenPredicates.isEmpty()) {
       // Prioritize members of 'betweenPredicates' ahead of 'result'.
       // BinaryPredicates that derived from BetweenPredicates may have lower selectivity
@@ -2657,6 +2658,9 @@ public class Analyzer {
       for (List<BinaryPredicate> predicates : betweenPredicates.values()) {
         prioritizedExprs.addAll(predicates);
       }
+      prioritizedExprs.addAll(result);
+      Expr.removeDuplicates(prioritizedExprs);
+      result = prioritizedExprs;
     }
     return result;
   }
@@ -2914,9 +2918,6 @@ public class Analyzer {
           LOG.trace(String.format("slot(%s) -> scc(%d)", slotDesc.getId(), sccId));
         }
       }
-      prioritizedExprs.addAll(result);
-      Expr.removeDuplicates(prioritizedExprs);
-      result = prioritizedExprs;
     }
     return result;
   }
