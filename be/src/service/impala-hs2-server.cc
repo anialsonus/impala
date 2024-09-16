@@ -69,12 +69,19 @@ const TProtocolVersion::type MAX_SUPPORTED_HS2_VERSION =
     TProtocolVersion::HIVE_CLI_SERVICE_PROTOCOL_V6;
 
 // HiveServer2 error returning macro
-#define HS2_RETURN_ERROR(return_val, error_msg, error_state) \
-  do { \
-    return_val.status.__set_statusCode(thrift::TStatusCode::ERROR_STATUS); \
-    return_val.status.__set_errorMessage((error_msg)); \
-    return_val.status.__set_sqlState((error_state)); \
-    return; \
+//
+// To include query id in the error message, it is required that the query id of the
+// thread debug info is set in at least the caller's scope.
+#define HS2_RETURN_ERROR(return_val, error_msg, error_state)                \
+  do {                                                                      \
+    return_val.status.__set_statusCode(thrift::TStatusCode::ERROR_STATUS);  \
+    return_val.status.__set_errorMessage(                                   \
+        GetThreadDebugInfo()->GetQueryId() == TUniqueId() ?                 \
+            (error_msg) :                                                   \
+            Substitute(ImpalaServer::QUERY_ERROR_FORMAT,                    \
+                PrintId(GetThreadDebugInfo()->GetQueryId()), (error_msg))); \
+    return_val.status.__set_sqlState((error_state));                        \
+    return;                                                                 \
   } while (false)
 
 #define HS2_RETURN_IF_ERROR(return_val, status, error_state) \
@@ -162,7 +169,8 @@ void ImpalaServer::ExecuteMetadataOp(const THandleIdentifier& session_handle,
   Status register_status = RegisterQuery(query_ctx.query_id, session, &query_handle);
   if (!register_status.ok()) {
     status->__set_statusCode(thrift::TStatusCode::ERROR_STATUS);
-    status->__set_errorMessage(register_status.GetDetail());
+    status->__set_errorMessage(Substitute(
+        QUERY_ERROR_FORMAT, PrintId(query_ctx.query_id), register_status.GetDetail()));
     status->__set_sqlState(SQLSTATE_GENERAL_ERROR);
     return;
   }
@@ -171,7 +179,8 @@ void ImpalaServer::ExecuteMetadataOp(const THandleIdentifier& session_handle,
   if (!exec_status.ok()) {
     discard_result(UnregisterQuery(query_handle->query_id(), false, &exec_status));
     status->__set_statusCode(thrift::TStatusCode::ERROR_STATUS);
-    status->__set_errorMessage(exec_status.GetDetail());
+    status->__set_errorMessage(Substitute(
+        QUERY_ERROR_FORMAT, PrintId(query_handle->query_id()), exec_status.GetDetail()));
     status->__set_sqlState(SQLSTATE_GENERAL_ERROR);
     return;
   }
@@ -182,7 +191,8 @@ void ImpalaServer::ExecuteMetadataOp(const THandleIdentifier& session_handle,
   if (!inflight_status.ok()) {
     discard_result(UnregisterQuery(query_handle->query_id(), false, &inflight_status));
     status->__set_statusCode(thrift::TStatusCode::ERROR_STATUS);
-    status->__set_errorMessage(inflight_status.GetDetail());
+    status->__set_errorMessage(Substitute(QUERY_ERROR_FORMAT,
+        PrintId(query_handle->query_id()), inflight_status.GetDetail()));
     status->__set_sqlState(SQLSTATE_GENERAL_ERROR);
     return;
   }
@@ -616,6 +626,10 @@ void ImpalaServer::ExecuteStatementCommon(TExecuteStatementResp& return_val,
 
   QueryHandle query_handle;
   status = Execute(&query_ctx, session, &query_handle, external_exec_request);
+
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_handle->query_id());
+
   HS2_RETURN_IF_ERROR(return_val, status, SQLSTATE_GENERAL_ERROR);
 
   // Start thread to wait for results to become available.
@@ -885,6 +899,9 @@ void ImpalaServer::GetOperationStatus(TGetOperationStatusResp& return_val,
       SQLSTATE_GENERAL_ERROR);
   VLOG_ROW << "GetOperationStatus(): query_id=" << PrintId(query_id);
 
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_id);
+
   QueryHandle query_handle;
   HS2_RETURN_IF_ERROR(
       return_val, GetActiveQueryHandle(query_id, &query_handle), SQLSTATE_GENERAL_ERROR);
@@ -903,7 +920,8 @@ void ImpalaServer::GetOperationStatus(TGetOperationStatusResp& return_val,
     return_val.__set_operationState(operation_state);
     if (operation_state == TOperationState::ERROR_STATE) {
       DCHECK(!query_handle->query_status().ok());
-      return_val.__set_errorMessage(query_handle->query_status().GetDetail());
+      return_val.__set_errorMessage(Substitute(QUERY_ERROR_FORMAT,
+          PrintId(query_id), query_handle->query_status().GetDetail()));
       return_val.__set_sqlState(SQLSTATE_GENERAL_ERROR);
     } else {
       ClientRequestState::RetryState retry_state = query_handle->retry_state();
@@ -923,6 +941,9 @@ void ImpalaServer::CancelOperation(TCancelOperationResp& return_val,
       request.operationHandle.operationId, &query_id, &op_secret),
       SQLSTATE_GENERAL_ERROR);
   VLOG_QUERY << "CancelOperation(): query_id=" << PrintId(query_id);
+
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_id);
 
   QueryHandle query_handle;
   HS2_RETURN_IF_ERROR(
@@ -955,6 +976,9 @@ void ImpalaServer::CloseImpalaOperation(TCloseImpalaOperationResp& return_val,
       SQLSTATE_GENERAL_ERROR);
   VLOG_QUERY << "CloseOperation(): query_id=" << PrintId(query_id);
 
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_id);
+
   QueryHandle query_handle;
   HS2_RETURN_IF_ERROR(
       return_val, GetActiveQueryHandle(query_id, &query_handle), SQLSTATE_GENERAL_ERROR);
@@ -986,6 +1010,9 @@ void ImpalaServer::GetResultSetMetadata(TGetResultSetMetadataResp& return_val,
       request.operationHandle.operationId, &query_id, &op_secret),
       SQLSTATE_GENERAL_ERROR);
   VLOG_QUERY << "GetResultSetMetadata(): query_id=" << PrintId(query_id);
+
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_id);
 
   QueryHandle query_handle;
   HS2_RETURN_IF_ERROR(
@@ -1038,6 +1065,8 @@ void ImpalaServer::FetchResults(TFetchResultsResp& return_val,
   VLOG_ROW << "FetchResults(): query_id=" << PrintId(query_id)
            << " fetch_size=" << request.maxRows;
 
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_id);
 
   QueryHandle query_handle;
   HS2_RETURN_IF_ERROR(
@@ -1082,6 +1111,8 @@ void ImpalaServer::GetLog(TGetLogResp& return_val, const TGetLogReq& request) {
       request.operationHandle.operationId, &query_id, &op_secret),
       SQLSTATE_GENERAL_ERROR);
 
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_id);
 
   QueryHandle query_handle;
   HS2_RETURN_IF_ERROR(
@@ -1123,7 +1154,10 @@ void ImpalaServer::GetLog(TGetLogResp& return_val, const TGetLogReq& request) {
     DCHECK_EQ(query_handle->exec_state() == ClientRequestState::ExecState::ERROR,
         !query_status.ok());
     // If the query status is !ok, include the status error message at the top of the log.
-    if (!query_status.ok()) ss << query_status.GetDetail();
+    if (!query_status.ok()) {
+      ss << Substitute(QUERY_ERROR_FORMAT, PrintId(query_handle->query_id()),
+          query_status.GetDetail());
+    }
   }
 
   // Report analysis errors
@@ -1175,6 +1209,9 @@ void ImpalaServer::GetExecSummary(TGetExecSummaryResp& return_val,
       THandleIdentifierToTUniqueId(
           request.operationHandle.operationId, &query_id, &op_secret),
       SQLSTATE_GENERAL_ERROR);
+
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_id);
 
   TExecSummary summary;
   TExecSummary original_summary;
@@ -1261,6 +1298,9 @@ void ImpalaServer::GetRuntimeProfile(
       SQLSTATE_GENERAL_ERROR);
 
   VLOG_RPC << "GetRuntimeProfile(): query_id=" << PrintId(query_id);
+
+  // Make query id available to the following HS2_RETURN_IF_ERROR().
+  ScopedThreadContext scoped_tdi(GetThreadDebugInfo(), query_id);
 
   // Set the RuntimeProfileOutput for the retried query (e.g. the second attempt of a
   // query). If the query has been retried this will be the retried profile. If the
